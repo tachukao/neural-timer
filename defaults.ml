@@ -12,7 +12,10 @@ let ts_set = [| 0.24; 0.28; 0.32; 0.39; 0.45; 0.33; 0.41; 0.49; 0.57; 0.65 |]
 
 let n_ts = Array.length ts_set 
 
-let tonic_input g ts = 
+let input_type = Cmdargs.(get_string "-input" |> force ~usage:"-input")
+
+
+let tonic_input g ts t = 
   let inp = 
     if g = 1.5 then 0.4 
     else if g = 1.0 then 0.3
@@ -20,13 +23,14 @@ let tonic_input g ts =
   if (t >= t_ready) && (t < (ts +. t_ready)) then inp
   else 0.
 
-let transient_input g ts = 
+let transient_input g ts t = 
   let inp = 
     if g = 1.5 then 0.4 
     else if g = 1.0 then 0.3
     else 0.35 in
   if (t >= t_ready) && (t < (ts +. t_ready)) then inp
   else 0.
+
 
 let set_input t ts = 
   if ( (t >= t_ready) && (t < (t_ready +. 0.02)) ) || 
@@ -40,6 +44,7 @@ let target_output a t g ts =
   let target_start = t_ready +. ts in
   if t < target_start then 0. else a *. Maths.( (exp ((t -. target_start) /. alpha /. tt ) ) -. 1.)
 
+let context_input = if input_type = "tonic" then tonic_input else if input_type = "transient" then transient_input else (assert false)
 
 let context_inputs g = Mat.init_2d n_ts n_steps 
     (fun ts_idx t -> 
@@ -48,12 +53,12 @@ let context_inputs g = Mat.init_2d n_ts n_steps
        context_input t g ts
     )
 
-let target_outputs g = 
+let target_outputs a g = 
   Mat.init_2d n_ts n_steps  
     (fun ts_idx t -> 
        let t = (float t) *. dt in
        let ts = ts_set.(ts_idx) in
-       target_output t g ts 
+       target_output a t g ts 
     )
 
 let set_inputs = Mat.init_2d n_ts n_steps
