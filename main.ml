@@ -5,6 +5,8 @@ open Defaults
 let _ = Printexc.record_backtrace true
 let input_type = Cmdargs.(get_string "-input" |> force ~usage:"-input")
 
+let a = Cmdargs.(get_float "-a" |> force ~usage:"-a")
+
 let in_dir s = Dir.in_dir (sprintf "%s/%s" input_type s)
 
 (* tau dx/dt = -x + Jr + Bu + cx + px *)
@@ -47,7 +49,6 @@ let forward a ts g x0 w0 bc bs j cx cz =
   let rec iterate x acc step = 
     let t = (float step) *. 1E-3 in
     if t < (t_target +. tt) then begin
-      flush_all ();
       let us = F (Defaults.set_input t ts) in
       let uc = F (Defaults.context_input t g ts) in
       let dx = Maths.( (j *@ (tanh x) - x + bc * (uc + uc_noise.(step)) + bs * us  + cx) / tau ) in
@@ -56,10 +57,9 @@ let forward a ts g x0 w0 bc bs j cx cz =
       let acc = if (t >= t_target) && (t < (t_target +. tt)) then  
           begin 
             let target = F Defaults.(target_output a t g ts) in
-            let zz  = Maths.(  acc + (sqr (z - target)) / (F tt) / (F 1000.)  ) in
             (* printf "%f, %f, %f\n" t (unpack_flt target) (unpack_flt z);
                flush_all ();*)
-            zz
+            Maths.(  acc + (sqr (z - target)) / (F tt) / (F 1000.)  ) 
           end
         else acc in
       iterate next_x acc (succ step) 
@@ -79,22 +79,24 @@ let unpack prms =
   let cz = Algodiff.D.Maths.get_item prms 0 Pervasives.(n + 5) in
   x0, w0, bc, bs, j, cx, cz
 
-let cost prms = 
+let cost a prms = 
   let x0, w0, bc, bs, j, cx, cz = unpack prms in
   let repetitions = 1 in
   let open Algodiff.D in
-  let regulariser = Maths.( (l2norm_sqr' w0) + (l2norm_sqr' cx) + (l2norm_sqr' bc) + (l2norm_sqr' bs) ) in
+  (* let regulariser = Maths.( (l2norm_sqr' w0) + (l2norm_sqr' cx) + (l2norm_sqr' bc) + (l2norm_sqr' bs) ) in *)
   (* printf "regulariser %f\n" (regulariser |> unpack_flt);*)
   let sum_cost_for g = 
     let open Algodiff.D in
+    let ts_set = [|0.5; 0.55; 0.6; 0.65; 0.7; 0.75; 0.8; 0.85; 0.9; 0.95; 1.0|] in
+    (* let ts_set = Array.concat [ts_set; Array.init 1 (fun _ -> Stats.uniform_rvs ~a:0.5 ~b:1.0 )] in  *)
     Array.map (fun ts -> 
-        Array.init repetitions (fun _ -> forward ts g x0 w0 bc bs j cx cz)
+        Array.init repetitions (fun _ -> forward a ts g x0 w0 bc bs j cx cz)
         |> Array.fold_left Maths.(+) (F 0.)
       ) ts_set
     |> Array.fold_left Maths.(+)  (F 0.) in
   Maths.(  (sum_cost_for 1.0) + (sum_cost_for 1.25) + (sum_cost_for 1.5)  ) (* + (F 0.0001 * regulariser) ) *)
 
-let dcost = Algodiff.D.grad cost
+let dcost a = Algodiff.D.grad (fun prms -> cost a prms)
 
 let for_prms prms = 
   let open Bigarray in 
@@ -102,15 +104,54 @@ let for_prms prms =
   (* printf "num total params %i\n" n_total_prms; *)
   genarray_of_array2 (reshape_2 z n (n+6) ) 
 
-let f_df prms g = 
+let f_df a prms g = 
   let open Bigarray in
   let open Algodiff.D in
   let prms = Arr (for_prms prms) in
-  let cost = cost prms in 
-  let dprms = dcost prms in 
+  let cost = cost a prms in 
+  let dprms = (dcost a) prms in 
   Bigarray.Genarray.blit (unpack_arr (dprms)) (for_prms g);
   unpack_flt cost
 
+
+let prms = initialize_prms () 
+           |> (fun x -> Mat.reshape x [| n_total_prms; 1|])
+           |> (fun x -> Bigarray.reshape_1 x n_total_prms) 
+
+
+let run_optimisation i a =
+  let in_dir s = in_dir (sprintf "%s_a_%i" s (int_of_float a) ) in
+  let stop max_iter k c =
+    printf "input %s | a %f | iter %5i | cost = %.8f%!\n" input_type a k c;
+    Gc.minor ();
+    Mat.save_txt (for_prms prms) (in_dir "prms");
+    flush_all ();
+    k >= max_iter in
+  let max_iter = 2000 in
+  let open Lbfgs in
+  Gc.minor () ;
+  let stop st = stop max_iter (iter st) (previous_f st) in
+  C.min ~print:(No) ~pgtol:0. ~factr:1E1 ~corrections:20 ~stop (f_df a) prms |> ignore;
+  let context_inputs_high = context_inputs 1.5 in
+  let context_inputs_low = context_inputs 1.0 in
+  let target_outputs_high = target_outputs a 1.5 in
+  let target_outputs_low = target_outputs a 1.0 in
+  printf "finished optimising %f\n" a
+  (* 
+  Mat.save_txt (Mat.transpose context_inputs_high) (in_dir "context_inputs_high");
+  Mat.save_txt (Mat.transpose context_inputs_low) (in_dir "context_inputs_low");
+  Mat.save_txt (Mat.transpose set_inputs) (in_dir "set_inputs");
+  Mat.save_txt (Mat.transpose target_outputs_high) (in_dir "target_outputs_high");
+  Mat.save_txt (Mat.transpose target_outputs_low) (in_dir "target_outputs_low")
+  *)
+
+
+let _ = 
+  let a_list = [a]  in
+  List.iteri run_optimisation a_list
+
+
+(* 
 let learn prms0 = 
   printf "start training\n";
   flush_all ();
@@ -128,44 +169,9 @@ let learn prms0 =
       loop (succ step) c prms
     else prms 
   in loop 0 0. prms0
-
-let prms = initialize_prms () 
-           |> (fun x -> Mat.reshape x [| n_total_prms; 1|])
-           |> (fun x -> Bigarray.reshape_1 x n_total_prms) 
-
-
-let run_optimisation i a =
-  let in_dir s = in_dir (sprintf "%s_a_%.3f" i ) in
-  let stop max_iter k c =
-    printf "iter %5i | cost = %.8f%!\n" k c;
-    Mat.save_txt (for_prms prms) (in_dir "prms");
-    flush_all ();
-    k >= max_iter in
-  let max_iter = 1000 in
-  let open Lbfgs in
-  Gc.minor () ;
-  let stop st = stop max_iter (iter st) (previous_f st) in
-  C.min ~print:(No) ~pgtol:0. ~factr:1E1 ~corrections:20 ~stop f_df prms |> ignore;
-  let context_inputs_high = context_inputs 1.5 in
-  let context_inputs_low = context_inputs 1.0 in
-  let target_outputs_high = target_outputs a 1.5 in
-  let target_outputs_low = target_outputs a 1.0 in
-  Mat.save_txt (Mat.transpose context_inputs_high) (in_dir "context_inputs_high");
-  Mat.save_txt (Mat.transpose context_inputs_low) (in_dir "context_inputs_low");
-  Mat.save_txt (Mat.transpose set_inputs) (in_dir "set_inputs");
-  Mat.save_txt (Mat.transpose target_outputs_high) (in_dir "target_outputs_high");
-  Mat.save_txt (Mat.transpose target_outputs_low) (in_dir "target_outputs_low")
-
-
-let _ = 
-  let a_list = [ 0.125; 0.25; 0.5; 1.; 2.; 4.; 8.; 16. ]  in
-  List.iteri run_optimisation a_list
-
-
-(* 
 let () = 
   let prms0 = Algodiff.D.(Arr (initialize_prms () ))  in
   let prms = learn prms0 in
   printf "done!\n"
-  *)
+*)
 
