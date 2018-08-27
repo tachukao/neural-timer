@@ -136,8 +136,8 @@ let run_optimisation i a =
   let context_inputs_low = context_inputs 1.0 in
   let target_outputs_high = target_outputs a 1.5 in
   let target_outputs_low = target_outputs a 1.0 in
-  printf "finished optimising %f\n" a
-  (* 
+  printf "finished optimising %f\n" a;
+  (*
   Mat.save_txt (Mat.transpose context_inputs_high) (in_dir "context_inputs_high");
   Mat.save_txt (Mat.transpose context_inputs_low) (in_dir "context_inputs_low");
   Mat.save_txt (Mat.transpose set_inputs) (in_dir "set_inputs");
