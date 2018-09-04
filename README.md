@@ -1,1 +1,5 @@
-# Reproducing Redmington et al., 2018 RNN
+# Neural Timer
+
+Reproducing RNN descreibed in Redmington et al., 2018 
+
+

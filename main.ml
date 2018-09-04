@@ -2,13 +2,6 @@ open Owl
 open Printf
 open Defaults
 
-let _ = Printexc.record_backtrace true
-let input_type = Cmdargs.(get_string "-input" |> force ~usage:"-input")
-
-let a = Cmdargs.(get_float "-a" |> force ~usage:"-a")
-
-let in_dir s = Dir.in_dir (sprintf "%s/%s" input_type s)
-
 (* tau dx/dt = -x + Jr + Bu + cx + px *)
 (* r = tanh (x) *)
 (* x0 ~ uniform (-1, 1) *)
@@ -17,6 +10,12 @@ let in_dir s = Dir.in_dir (sprintf "%s/%s" input_type s)
 (* bs  ~ uniform (-1, 1) *)
 (* w0  zero in the beginning *)
 (* cz  zero in the beginning *)
+ 
+let _ = Printexc.record_backtrace true
+let input_type = Cmdargs.(get_string "-input" |> force ~usage:"-input")
+let a = Cmdargs.(get_float "-a" |> force ~usage:"-a")
+
+let in_dir s = Dir.in_dir (sprintf "%s/%s" input_type s)
 
 let initialize_prms () = 
   let x0 = Mat.uniform ~a:(-1.) ~b:1. n 1 in
@@ -67,7 +66,6 @@ let forward a ts g x0 w0 bc bs j cx cz =
     else acc
   in iterate x0 (F 0.) 1
 
-(* prms = [ j bc bs x0 cz ] + *)
 let unpack prms = 
   let open Algodiff.D in
   let x0 = Algodiff.D.Maths.get_slice [ [ ]; [0] ] prms  in
@@ -78,6 +76,7 @@ let unpack prms =
   let cx = Algodiff.D.Maths.get_slice [ [ ]; [Pervasives.(n+4)] ] prms  in
   let cz = Algodiff.D.Maths.get_item prms 0 Pervasives.(n + 5) in
   x0, w0, bc, bs, j, cx, cz
+
 
 let cost a prms = 
   let x0, w0, bc, bs, j, cx, cz = unpack prms in
@@ -131,19 +130,7 @@ let run_optimisation i a =
   let open Lbfgs in
   Gc.minor () ;
   let stop st = stop max_iter (iter st) (previous_f st) in
-  C.min ~print:(No) ~pgtol:0. ~factr:1E1 ~corrections:20 ~stop (f_df a) prms |> ignore;
-  let context_inputs_high = context_inputs 1.5 in
-  let context_inputs_low = context_inputs 1.0 in
-  let target_outputs_high = target_outputs a 1.5 in
-  let target_outputs_low = target_outputs a 1.0 in
-  printf "finished optimising %f\n" a;
-  (*
-  Mat.save_txt (Mat.transpose context_inputs_high) (in_dir "context_inputs_high");
-  Mat.save_txt (Mat.transpose context_inputs_low) (in_dir "context_inputs_low");
-  Mat.save_txt (Mat.transpose set_inputs) (in_dir "set_inputs");
-  Mat.save_txt (Mat.transpose target_outputs_high) (in_dir "target_outputs_high");
-  Mat.save_txt (Mat.transpose target_outputs_low) (in_dir "target_outputs_low")
-  *)
+  C.min ~print:(No) ~pgtol:0. ~factr:1E1 ~corrections:20 ~stop (f_df a) prms |> ignore
 
 
 let _ = 
@@ -152,6 +139,7 @@ let _ =
 
 
 (* 
+(*  vanilla gradient descrent *)
 let learn prms0 = 
   printf "start training\n";
   flush_all ();
