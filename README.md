@@ -1,5 +1,5 @@
 # Neural Timer
 
-Reproducing RNN descreibed in Redmington et al., 2018 
+Reproducing RNN described in Redmington et al., 2018 
 
 
